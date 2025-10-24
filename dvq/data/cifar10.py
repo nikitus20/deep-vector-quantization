@@ -2,14 +2,15 @@ from torch.utils.data import DataLoader
 from torchvision import transforms as T
 from torchvision.datasets import CIFAR10
 
-import pytorch_lightning as pl
+from lightning.pytorch import LightningDataModule
 
-class CIFAR10Data(pl.LightningDataModule):
+class CIFAR10Data(LightningDataModule):
     """ returns cifar-10 examples in floats in range [0,1] """
 
     def __init__(self, args):
         super().__init__()
-        self.hparams = args
+        # Save hyperparameters - convert argparse Namespace to dict
+        self.save_hyperparameters(vars(args))
 
     def train_dataloader(self):
         transform = T.Compose(

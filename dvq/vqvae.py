@@ -11,8 +11,8 @@ import torch
 from torch import nn, einsum
 import torch.nn.functional as F
 
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+from lightning.pytorch import LightningModule, Trainer, Callback, seed_everything
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from data.cifar10 import CIFAR10Data
 from model.deepmind_enc_dec import DeepMindEncoder, DeepMindDecoder
@@ -23,7 +23,7 @@ from model.loss import Normal, LogitLaplace
 
 # -----------------------------------------------------------------------------
 
-class VQVAE(pl.LightningModule):
+class VQVAE(LightningModule):
 
     def __init__(self, args, input_channels=3):
         super().__init__()
@@ -135,7 +135,7 @@ class VQVAE(pl.LightningModule):
 
 # -----------------------------------------------------------------------------
 def cos_anneal(e0, e1, t0, t1, e):
-    """ ramp from (e0, t0) -> (e1, t1) through a cosine schedule based on e \in [e0, e1] """
+    """ ramp from (e0, t0) -> (e1, t1) through a cosine schedule based on e \\in [e0, e1] """
     alpha = max(0, min(1, (e - e0) / (e1 - e0))) # what fraction of the way through are we
     alpha = 1.0 - math.cos(alpha * math.pi/2) # warp through cosine
     t = alpha * t1 + (1 - alpha) * t0 # interpolate accordingly
@@ -144,13 +144,13 @@ def cos_anneal(e0, e1, t0, t1, e):
 """
 These ramps/decays follow DALL-E Appendix A.2 Training https://arxiv.org/abs/2102.12092
 """
-class DecayTemperature(pl.Callback):
+class DecayTemperature(Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx):
         # The relaxation temperature τ is annealed from 1 to 1/16 over the first 150,000 updates.
         t = cos_anneal(0, 150000, 1.0, 1.0/16, trainer.global_step)
         pl_module.quantizer.temperature = t
 
-class RampBeta(pl.Callback):
+class RampBeta(Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx):
         # The KL weight β is increased from 0 to 6.6 over the first 5000 updates
         # "We divide the overall loss by 256 × 256 × 3, so that the weight of the KL term
@@ -159,7 +159,7 @@ class RampBeta(pl.Callback):
         t = cos_anneal(0, 5000, 0.0, 5e-4, trainer.global_step)
         pl_module.quantizer.kld_scale = t
 
-class DecayLR(pl.Callback):
+class DecayLR(Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx):
         # The step size is annealed from 1e10−4 to 1.25e10−6 over 1,200,000 updates. I use 3e-4
         t = cos_anneal(0, 1200000, 3e-4, 1.25e-6, trainer.global_step)
@@ -167,13 +167,20 @@ class DecayLR(pl.Callback):
             g['lr'] = t
 
 def cli_main():
-    pl.seed_everything(1337)
+    seed_everything(1337)
 
     # -------------------------------------------------------------------------
     # arguments...
     parser = ArgumentParser()
-    # training related
-    parser = pl.Trainer.add_argparse_args(parser)
+    # training related (manually add common Trainer arguments)
+    parser.add_argument("--devices", type=int, default=1, help="number of devices (GPUs/CPUs)")
+    parser.add_argument("--accelerator", type=str, default="auto", help="accelerator type (gpu, cpu, auto)")
+    parser.add_argument("--max_steps", type=int, default=3000000, help="maximum number of training steps")
+    parser.add_argument("--max_epochs", type=int, default=-1, help="maximum number of epochs (-1 for unlimited)")
+    parser.add_argument("--precision", type=str, default="32-true", help="training precision (32-true, 16-mixed, bf16-mixed)")
+    parser.add_argument("--gradient_clip_val", type=float, default=None, help="gradient clipping value")
+    parser.add_argument("--accumulate_grad_batches", type=int, default=1, help="number of batches to accumulate gradients")
+    parser.add_argument("--log_every_n_steps", type=int, default=50, help="how often to log within steps")
     # model related
     parser = VQVAE.add_model_specific_args(parser)
     # dataloader related
@@ -193,7 +200,19 @@ def cli_main():
     callbacks.append(DecayLR())
     if args.vq_flavor == 'gumbel':
        callbacks.extend([DecayTemperature(), RampBeta()])
-    trainer = pl.Trainer.from_argparse_args(args, callbacks=callbacks, max_steps=3000000)
+
+    # Create trainer manually with explicit arguments
+    trainer = Trainer(
+        devices=args.devices,
+        accelerator=args.accelerator,
+        max_steps=args.max_steps,
+        max_epochs=args.max_epochs,
+        precision=args.precision,
+        gradient_clip_val=args.gradient_clip_val,
+        accumulate_grad_batches=args.accumulate_grad_batches,
+        log_every_n_steps=args.log_every_n_steps,
+        callbacks=callbacks,
+    )
 
     trainer.fit(model, data)
 
