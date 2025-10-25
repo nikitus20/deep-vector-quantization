@@ -45,10 +45,15 @@ class VQVAEQuantize(nn.Module):
 
         # DeepMind def does not do this but I find I have to... ;\
         if self.training and self.data_initialized.item() == 0:
-            print('running kmeans!!') # data driven initialization for the embeddings
-            rp = torch.randperm(flatten.size(0))
-            kd = kmeans2(flatten[rp[:20000]].data.cpu().numpy(), self.n_embed, minit='points')
-            self.embed.weight.data.copy_(torch.from_numpy(kd[0]))
+            # Only run k-means if we have enough samples (need more samples than clusters)
+            n_samples = min(20000, flatten.size(0))
+            if n_samples >= self.n_embed:
+                print('running kmeans!!') # data driven initialization for the embeddings
+                rp = torch.randperm(flatten.size(0))
+                kd = kmeans2(flatten[rp[:n_samples]].data.cpu().numpy(), self.n_embed, minit='points')
+                self.embed.weight.data.copy_(torch.from_numpy(kd[0]))
+            else:
+                print(f'skipping kmeans (need {self.n_embed} samples but only have {n_samples}), using default initialization')
             self.data_initialized.fill_(1)
             # TODO: this won't work in multi-GPU setups
 
