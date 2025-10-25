@@ -174,7 +174,9 @@ def cli_main():
     parser = ArgumentParser()
     # training related (manually add common Trainer arguments)
     parser.add_argument("--devices", type=int, default=1, help="number of devices (GPUs/CPUs)")
-    parser.add_argument("--accelerator", type=str, default="auto", help="accelerator type (gpu, cpu, auto)")
+    parser.add_argument("--accelerator", type=str, default="auto",
+                        choices=['auto', 'cpu', 'gpu', 'mps'],
+                        help="accelerator type: auto (detect), cpu, gpu (CUDA), mps (Apple Silicon)")
     parser.add_argument("--max_steps", type=int, default=3000000, help="maximum number of training steps")
     parser.add_argument("--max_epochs", type=int, default=-1, help="maximum number of epochs (-1 for unlimited)")
     parser.add_argument("--precision", type=str, default="32-true", help="training precision (32-true, 16-mixed, bf16-mixed)")
